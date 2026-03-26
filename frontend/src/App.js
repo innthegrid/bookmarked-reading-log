@@ -1,19 +1,25 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
+import './App.css';
 
 function App() {
-  const [message, setMessage] = useState("Loading...");
-
-  useEffect(() => {
-    axios.get('http://127.0.0.1:5000/api/hello')
-      .then(res => setMessage(res.data.message))
-      .catch(err => setMessage("Backend not reached"));
-  }, []);
+  const [books, setBooks] = useState([]);
 
   return (
-    <div style={{ textAlign: 'center', marginTop: '50px' }}>
-      <h1>Reading Log Tracker</h1>
-      <p>Backend Status: <strong>{message}</strong></p>
+    <div className="App">
+      <div className="main-container">
+        <header>
+          <h1>Bookmarked</h1>
+          <p>Reading Log</p>
+        </header>
+
+        <main>
+          <section className="nes-container with-title">
+            <h3 className="title">My Library</h3>
+            <p>Time to pick up a book!</p>
+          </section>
+        </main>
+      </div>
     </div>
   );
 }
