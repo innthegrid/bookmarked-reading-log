@@ -1,7 +1,8 @@
 from datetime import datetime, timezone
-from flask import Flask
+from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
+import requests
 from sqlalchemy import event
 
 app = Flask(__name__)
@@ -11,12 +12,18 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///library.db' # DB is stored in
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False # Stop warnings when we modify the DB, reduces overhead
 db = SQLAlchemy(app) # Creates DB object, we use it to interact with the DB
 
-# DEFINE SCHEMA
+# --- DEFINE SCHEMA ---
 
 # book_authors - many-to-many relationship between books and authors
 book_authors = db.Table('book_authors',
                         db.Column('book_id', db.Integer, db.ForeignKey('books.book_id'), primary_key=True),
                         db.Column('author_id', db.Integer, db.ForeignKey('authors.author_id'), primary_key=True)
+)
+
+# book_genres - many-to-many relationship between books and genres
+book_genres = db.Table('book_genres',
+                        db.Column('book_id', db.Integer, db.ForeignKey('books.book_id'), primary_key=True),
+                        db.Column('genre_id', db.Integer, db.ForeignKey('genres.genre_id'), primary_key=True)
 )
 
 class User(db.Model):
@@ -39,17 +46,15 @@ class Book(db.Model):
   title = db.Column(db.String(200), nullable=False)
   page_count = db.Column(db.Integer)
   published_year = db.Column(db.Integer)
-  fiction = db.Column(db.Boolean, default=True)
   image_url = db.Column(db.Text)
   description = db.Column(db.Text)
   
   # Foreign keys
   series_id = db.Column(db.Integer, db.ForeignKey('series.series_id'))
-  genre_id = db.Column(db.Integer, db.ForeignKey('genres.genre_id'))
   
   # Relationships
   authors = db.relationship('Author', secondary=book_authors, back_populates='books')
-  genre = db.relationship('Genre', back_populates='books')
+  genres = db.relationship('Genre', secondary=book_genres, back_populates='books')
   series = db.relationship('Series', back_populates='books')
   user_instances = db.relationship('UserBook', back_populates='book')
 
@@ -71,7 +76,7 @@ class Genre(db.Model):
   genre_name = db.Column(db.String(50), unique=True, nullable=False)
   
   # Relationships
-  books = db.relationship('Book', back_populates='genre')
+  books = db.relationship('Book', secondary=book_genres, back_populates='genre')
 
 class Series(db.Model):
   __tablename__ = 'series'
@@ -172,7 +177,48 @@ class Goal(db.Model):
   # Relationships
   user = db.relationship('User', back_populates='goals')
 
-# DATABASE INITIALIZATION
+# --- ROUTES ---
+@app.route('/api/search', methods=['GET'])
+def search_books():
+  query = request.args.get('q')
+  if not query:
+    return jsonify({"error": "No search query provided"}), 400
+  
+  # Google Books API URL
+  google_books_url = f'https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=20'
+  
+  try:
+    response = requests.get(google_books_url)
+    response.raise_for_status()
+    data = response.json()
+    
+    search_results = []
+    for item in data.get('items', []):
+      volume_info = item.get('volumeInfo', {})
+      
+      published_date = volume_info.get('publishedDate', '')
+      year = None
+      if published_date and published_date[:4].isdigit():
+        year = int(published_date[:4])
+      
+      # Extract data
+      book_data = {
+        'google_books_id': item.get('id'),
+        'title': volume_info.get('title'),
+        'authors': volume_info.get('authors'),
+        'genres': volume_info.get('categories'),
+        'description': volume_info.get('description'),
+        'page_count': volume_info.get('pageCount'),
+        'published_year': year,
+        'image_url': volume_info.get('imageLinks', {}).get('thumbnail'),
+      }
+      search_results.append(book_data)
+      
+    return jsonify(search_results)
+  except requests.exceptions.RequestException as e:
+    return jsonify({'error': str(e)}), 500
+
+# --- DATABASE INITIALIZATION ---
 with app.app_context():
   db.create_all()
   print("Database tables created successfully!")
