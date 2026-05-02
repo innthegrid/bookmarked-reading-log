@@ -8,6 +8,7 @@ class UserBook(db.Model):
     __table_args__ = (
         db.UniqueConstraint("user_id", "book_id", name="unique_user_book"),
         db.CheckConstraint("rating >= 1 AND rating <= 5", name="valid_rating"),
+        db.Index("idx_user_status", "user_id", "status")
     )
 
     user_book_id = db.Column(db.Integer, primary_key=True)

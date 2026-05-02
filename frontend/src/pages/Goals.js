@@ -34,18 +34,29 @@ export default function Goals({ userId }) {
       return;
     }
 
+    const targetNum = Number(target);
+    const yearNum = Number(year);
+
+    if (
+      !Number.isInteger(targetNum) ||
+      targetNum <= 0 ||
+      !Number.isInteger(yearNum)
+    ) {
+      alert("Enter valid numbers.");
+      return;
+    }
+
     try {
       setLoading(true);
 
       await axios.post(`${API_BASE}/goals`, {
         user_id: userId,
         period_type: periodType,
-        target_value: parseInt(target),
-        year: parseInt(year),
+        target_value: targetNum,
+        year: yearNum,
         ...(periodType === "monthly" && { month: parseInt(month) })
       });
 
-      // reset form
       setTarget("");
       setMonth("");
 
@@ -126,7 +137,7 @@ export default function Goals({ userId }) {
             style={{ flex: 1 }}
           />
 
-          {/* MONTH (inline, next to year) */}
+          {/* MONTH */}
           {periodType === "monthly" && (
             <div className="nes-select" style={{ flex: 1 }}>
               <select

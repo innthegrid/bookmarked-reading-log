@@ -9,6 +9,7 @@ goals_bp = Blueprint("goals", __name__)
 from datetime import datetime
 from models import UserBook, ReadingLog
 
+
 @goals_bp.route("/api/goals", methods=["GET"])
 def get_goals():
     user_id = request.args.get("user_id", type=int)
@@ -52,19 +53,49 @@ def get_goals():
 
     return jsonify(results)
 
+
 @goals_bp.route("/api/goals", methods=["POST"])
 def add_goal():
     data = request.json
+
+    try:
+        user_id = int(data["user_id"])
+        target_value = int(data["target_value"])
+        year = int(data["year"])
+    except (ValueError, TypeError, KeyError):
+        return jsonify({"error": "Invalid numeric input"}), 400
+
+    if target_value <= 0:
+        return jsonify({"error": "Target must be positive"}), 400
+
+    period_type = data.get("period_type")
+
+    if period_type not in ["yearly", "monthly"]:
+        return jsonify({"error": "Invalid goal type"}), 400
+
+    month = None
+    if period_type == "monthly":
+        try:
+            month = int(data["month"])
+        except (ValueError, TypeError, KeyError):
+            return jsonify({"error": "Invalid month"}), 400
+
+        if not 1 <= month <= 12:
+            return jsonify({"error": "Month must be 1-12"}), 400
+
     goal = Goal(
-        user_id=data["user_id"],
-        period_type=data["period_type"],
-        target_value=data["target_value"],
-        month=data.get("month") if data.get("period_type") == "monthly" else None,
-        year=data.get("year"),
+        user_id=user_id,
+        period_type=period_type,
+        target_value=target_value,
+        month=month,
+        year=year,
     )
+
     db.session.add(goal)
     db.session.commit()
+
     return jsonify({"message": "Goal added", "goal_id": goal.goal_id}), 201
+
 
 @goals_bp.route("/api/goals/<int:goal_id>", methods=["PUT"])
 def update_goal(goal_id):
@@ -87,6 +118,7 @@ def delete_goal(goal_id):
     db.session.delete(goal)
     db.session.commit()
     return jsonify({"message": "Goal deleted"})
+
 
 @goals_bp.route("/api/goals/progress", methods=["GET"])
 def get_goal_progress():

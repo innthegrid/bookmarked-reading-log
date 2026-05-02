@@ -136,7 +136,7 @@ def seed():
                         )
                     )
 
-            # --- Genres (FIXED) ---
+            # --- Genres ---
             for raw in raw_genres:
                 if not raw:
                     continue

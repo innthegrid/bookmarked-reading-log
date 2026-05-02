@@ -7,6 +7,7 @@ from flask_cors import cross_origin
 
 library_bp = Blueprint("library", __name__)
 
+allowed_statuses = {"want_to_read", "reading", "completed"}
 
 @library_bp.route("/api/library", methods=["GET"])
 def get_library():
@@ -57,67 +58,94 @@ def add_to_library():
 
     if not user_id or not google_id:
         return jsonify({"error": "user_id and google_books_id required"}), 400
+    
+    status = data.get("status", "want_to_read")
+    
+    if status not in allowed_statuses:
+        return jsonify({"error":"Invalid status"}),400
 
-    book = Book.query.filter_by(google_books_id=google_id).first()
+    try:
+        with db.session.begin():
+            
+            book = Book.query.filter_by(google_books_id=google_id).first()
 
-    if not book:
-        book = Book(
-            google_books_id=google_id,
-            title=data.get("title"),
-            image_url=data.get("image_url"),
-            page_count=data.get("page_count"),
-            published_year=data.get("published_year"),
-            description=data.get("description"),
-            series_position=data.get("series_position"),
-        )
-        db.session.add(book)
-        db.session.flush()
-
-    for author_name in data.get("authors", []):
-        if not author_name:
-            continue
-
-        author = Author.query.filter_by(name=author_name).first()
-        if not author:
-            author = Author(name=author_name)
-            db.session.add(author)
-            db.session.flush()
-
-        if author not in book.authors:
-            book.authors.append(author)
-
-    for raw_genre in data.get("genres", []):
-        if not raw_genre:
-            continue
-
-        parts = [g.strip() for g in raw_genre.split("/")]
-
-        for genre_name in parts:
-            if not genre_name:
-                continue
-
-            genre = Genre.query.filter_by(genre_name=genre_name).first()
-            if not genre:
-                genre = Genre(genre_name=genre_name)
-                db.session.add(genre)
+            if not book:
+                book = Book(
+                    google_books_id=google_id,
+                    title=data.get("title"),
+                    image_url=data.get("image_url"),
+                    page_count=data.get("page_count"),
+                    published_year=data.get("published_year"),
+                    description=data.get("description"),
+                    series_position=data.get("series_position"),
+                )
+                db.session.add(book)
                 db.session.flush()
 
-            if genre not in book.genres:
-                book.genres.append(genre)
+            for author_name in data.get("authors", []):
+                if not author_name:
+                    continue
 
-    user_book = UserBook.query.filter_by(
-        user_id=user_id,
-        book_id=book.book_id
-    ).first()
+                author = Author.query.filter_by(name=author_name).first()
+                if not author:
+                    author = Author(name=author_name)
+                    db.session.add(author)
+                    db.session.flush()
 
-    status = data.get("status", "want_to_read")
+                if author not in book.authors:
+                    book.authors.append(author)
 
-    if user_book:
-        old_status = user_book.status
-        if status and old_status != status:
-            user_book.status = status
+            for raw_genre in data.get("genres", []):
+                if not raw_genre:
+                    continue
 
-            if old_status != "completed" and status == "completed":
+                parts = [g.strip() for g in raw_genre.split("/")]
+
+                for genre_name in parts:
+                    if not genre_name:
+                        continue
+
+                    genre = Genre.query.filter_by(genre_name=genre_name).first()
+                    if not genre:
+                        genre = Genre(genre_name=genre_name)
+                        db.session.add(genre)
+                        db.session.flush()
+
+                    if genre not in book.genres:
+                        book.genres.append(genre)
+
+            user_book = UserBook.query.filter_by(user_id=user_id, book_id=book.book_id).first()
+
+            if user_book:
+                old_status = user_book.status
+                if status and old_status != status:
+                    user_book.status = status
+
+                    if old_status != "completed" and status == "completed":
+                        log = ReadingLog(
+                            user_book_id=user_book.user_book_id,
+                            end_date=date.today(),
+                            pages_read=book.page_count,
+                        )
+                        db.session.add(log)
+
+                db.session.commit()
+
+                return (
+                    jsonify(
+                        {
+                            "message": "Book already in library",
+                            "user_book_id": user_book.user_book_id,
+                        }
+                    ),
+                    200,
+                )
+
+            user_book = UserBook(user_id=user_id, book_id=book.book_id, status=status)
+            db.session.add(user_book)
+            db.session.flush()
+
+            if status == "completed":
                 log = ReadingLog(
                     user_book_id=user_book.user_book_id,
                     end_date=date.today(),
@@ -125,35 +153,16 @@ def add_to_library():
                 )
                 db.session.add(log)
 
-        db.session.commit()
+            db.session.commit()
 
-        return jsonify({
-            "message": "Book already in library",
-            "user_book_id": user_book.user_book_id,
-        }), 200
-
-    user_book = UserBook(
-        user_id=user_id,
-        book_id=book.book_id,
-        status=status
-    )
-    db.session.add(user_book)
-    db.session.flush()
-
-    if status == "completed":
-        log = ReadingLog(
-            user_book_id=user_book.user_book_id,
-            end_date=date.today(),
-            pages_read=book.page_count,
-        )
-        db.session.add(log)
-
-    db.session.commit()
-
-    return jsonify({
-        "message": "Book added",
-        "user_book_id": user_book.user_book_id
-    }), 201
+            return (
+                jsonify({"message": "Book added", "user_book_id": user_book.user_book_id}),
+                201,
+            )
+            
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Transaction failed"}), 500
 
 
 @library_bp.route("/api/library/<int:user_book_id>", methods=["PATCH", "OPTIONS"])
@@ -162,27 +171,47 @@ def update_user_book(user_book_id):
     if request.method == "OPTIONS":
         return jsonify({}), 200
 
-    ub = UserBook.query.get_or_404(user_book_id)
     data = request.json
+    
+    try:
+        with db.session.begin():
+    
+            ub = UserBook.query.get_or_404(user_book_id)
 
-    if "rating" in data:
-        ub.rating = data["rating"]
+            if "rating" in data:
+                try:
+                    rating = int(data["rating"])
+                except:
+                    return jsonify({"error":"Invalid rating"}),400
 
-    if "status" in data:
-        old_status = ub.status
-        new_status = data["status"]
-        ub.status = new_status
+                if not 1 <= rating <= 5:
+                    return jsonify({"error":"Rating must be 1-5"}),400
 
-        if old_status != "completed" and new_status == "completed":
-            log = ReadingLog(
-                user_book_id=ub.user_book_id,
-                end_date=date.today(),
-                pages_read=ub.book.page_count,
-            )
-            db.session.add(log)
+                ub.rating = rating
 
-    db.session.commit()
-    return jsonify({"message": "Book updated"})
+            if "status" in data:
+                old_status = ub.status
+                new_status = data["status"]
+
+                if new_status not in allowed_statuses:
+                    return jsonify({"error": "Invalid status"}), 400
+                
+                ub.status = new_status
+
+                if old_status != "completed" and new_status == "completed":
+                    log = ReadingLog(
+                        user_book_id=ub.user_book_id,
+                        end_date=date.today(),
+                        pages_read=ub.book.page_count,
+                    )
+                    db.session.add(log)
+
+            db.session.commit()
+            return jsonify({"message": "Book updated"})
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Update failed"}), 500
 
 
 @library_bp.route("/api/library/<int:user_book_id>", methods=["DELETE", "OPTIONS"])

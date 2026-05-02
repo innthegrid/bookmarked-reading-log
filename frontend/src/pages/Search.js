@@ -70,9 +70,8 @@ const BookResultCard = ({ book, onAdd, onViewDetails, libraryStatus }) => {
         </div>
 
         <button
-          className={`nes-btn is-small ${
-            libraryStatus ? "is-warning" : "is-primary"
-          }`}
+          className={`nes-btn is-small ${libraryStatus ? "is-warning" : "is-primary"
+            }`}
           onClick={() => onAdd(book, status)}
           style={{ marginTop: "8px", width: "100%" }}
         >
@@ -115,7 +114,15 @@ const Search = ({ userId }) => {
   }, [userId]);
 
   const handleSearch = async () => {
-    if (!query.trim()) return;
+    const cleanQuery = query.trim();
+    
+    if (!cleanQuery) return;
+
+    if (cleanQuery.length > 100) {
+      alert("Search too long.");
+      return;
+    }
+
     setLoading(true);
     try {
       const data = await searchBooks(query);
@@ -172,7 +179,7 @@ const Search = ({ userId }) => {
       alert("Error saving book.");
     }
   };
-  
+
   return (
     <div className="search-page">
       <section className="nes-container with-title">
